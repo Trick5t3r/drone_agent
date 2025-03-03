@@ -468,15 +468,16 @@ class MyDroneEval(DroneAbstract):
         diff = self.explored_reward - self._old_explored_reward
         if self.last_explore_state is not None:
             self.ddpg_agent.push(self.last_explore_state, self.last_explore_action, 
-                                   diff, state, False)
+                                   diff*10000, state, False)
             self.ddpg_agent.update()
+        
+        action = self.ddpg_agent.select_action(state)
         # Si la différence est nulle, on force une action d'exploration aléatoire
         if diff == 0:
             # On peut définir une action aléatoire dans l'intervalle désiré :
-            action = np.array([random.uniform(0, 1), random.uniform(-1, 1)])
-        else:
-            # Sinon, on utilise l'agent DDPG pour sélectionner une action
-            action = self.ddpg_agent.select_action(state)
+            action += np.array([random.uniform(0, 1), random.uniform(-1, 1)])
+            action /= 2
+
         self.last_explore_state = state
         self.last_explore_action = action
         # L'action est un vecteur [forward, rotation]

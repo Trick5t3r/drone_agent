@@ -137,6 +137,17 @@ class GuiSR(TopDownView):
     def set_caption(self, window_title: str):
         self._playground.window.set_caption(window_title)
 
+    def set_drones(self, conf_agent):
+        if self._drones and conf_agent != None:
+            for i in range(self._number_drones):
+                self._drones[i].ddpg_agent = conf_agent
+    
+    def get_drones_conf(self):
+        if len(self._drones) > 0:
+            return self._drones[0].ddpg_agent
+        else:
+            return None
+
     def run(self):
         self._playground.window.run()
 
@@ -169,7 +180,7 @@ class GuiSR(TopDownView):
             self._drones[i].elapsed_walltime = self._elapsed_walltime
             self._drones[i].elapsed_timestep = self._elapsed_timestep
 
-            self._drones[i].explored_reward = self._the_map.explored_map.score()
+            self._drones[i].explored_reward = self._the_map.explored_map.score() * 100.0
             command = self._drones[i].control()
             if self._use_keyboard and i == 0:
                 command = self._keyboardController.control()

@@ -67,7 +67,7 @@ class Launcher:
         self.team_info = TeamInfo()
         self.eval_plan = EvalPlan()
 
-        eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=3)
+        eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=5)
         self.eval_plan.add(eval_config=eval_config)
         self.number_drones = None
         self.max_timestep_limit = None
@@ -90,7 +90,7 @@ class Launcher:
                                     result_path=self.result_path,
                                     enabled=stat_saving_enabled)
 
-    def one_round(self, eval_config: EvalConfig, num_round: int, hide_solution_output: bool = False):
+    def one_round(self, eval_config: EvalConfig, num_round: int, hide_solution_output: bool = False, conf_agent=None):
         """
         The one_round method is responsible for running a single round of the
         session. It creates an instance of the map class with the specified
@@ -140,6 +140,7 @@ class Launcher:
                         f"Map: {type(my_map).__name__}   -   "
                         f"Round: {num_round_str}")
         my_gui.set_caption(window_title)
+        my_gui.set_drones(conf_agent)
 
         my_map.explored_map.reset()
 
@@ -155,9 +156,11 @@ class Launcher:
             my_gui.run()
         except Exception as error:
             error_msg = traceback.format_exc()
+            conf_agent = my_gui.get_drones_conf()
             my_gui.close()
             has_crashed = True
         finally:
+            conf_agent = my_gui.get_drones_conf()
             if hide_solution_output:
                 sys.stdout.close()
                 sys.stdout = original_stdout
@@ -186,7 +189,8 @@ class Launcher:
                 score_health_returned,
                 my_gui.elapsed_walltime,
                 my_gui.is_max_walltime_limit_reached,
-                has_crashed)
+                has_crashed,
+                conf_agent)
 
     def go(self, stop_at_first_crash: bool = False, hide_solution_output: bool = False):
         """
@@ -194,6 +198,7 @@ class Launcher:
          and calculating the score for each one.
         """
         ok = True
+        conf_agent = None
 
         print(f"--------------------------------------------------------------------------------------------")
 
@@ -210,11 +215,11 @@ class Launcher:
                 print(f"* Map: {eval_config.map_name}, special zones: {eval_config.zones_name_casual}, "
                       f"round: {num_round + 1}/{eval_config.nb_rounds}")
                 gc.collect()
-                result = self.one_round(eval_config, num_round + 1, hide_solution_output)
+                result = self.one_round(eval_config, num_round + 1, hide_solution_output, conf_agent)
                 (percent_drones_destroyed, mean_drones_health, elapsed_timestep,
                  full_rescue_timestep, score_exploration, rescued_number,
                  score_health_returned, elapsed_walltime,
-                 is_max_walltime_limit_reached, has_crashed) = result
+                 is_max_walltime_limit_reached, has_crashed, conf_agent) = result
 
                 result_score = self.score_manager.compute_score(rescued_number,
                                                                 score_exploration,
