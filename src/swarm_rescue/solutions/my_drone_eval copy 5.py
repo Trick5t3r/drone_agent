@@ -9,11 +9,6 @@ import cv2
 import arcade
 import heapq
 
-# Import de PyTorch pour l'agent DDPG
-import torch
-import torch.nn as nn
-import torch.optim as optim
-
 from spg.playground import Playground
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
@@ -42,151 +37,12 @@ CLIP_MIN = -40
 CLIP_MAX = 40
 VAL_RESCUE_ZONE = 100.0
 
-###########################################
-# PARTIE DDPG : Définition des réseaux et agent
-###########################################
-
-class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Actor, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, action_dim)
-    
-    def forward(self, state):
-        x = torch.relu(self.fc1(state))
-        x = torch.relu(self.fc2(x))
-        # Utilisation de tanh pour obtenir des sorties dans [-1,1]
-        x = torch.tanh(self.fc3(x))
-        return x
-
-class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim + action_dim, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, 1)
-    
-    def forward(self, state, action):
-        x = torch.cat([state, action], dim=1)
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
-
-class ReplayBuffer:
-    def __init__(self, capacity=10000):
-        self.capacity = capacity
-        self.buffer = []
-    
-    def push(self, state, action, reward, next_state, done):
-        if len(self.buffer) >= self.capacity:
-            self.buffer.pop(0)
-        self.buffer.append((state, action, reward, next_state, done))
-    
-    def sample(self, batch_size):
-        batch = random.sample(self.buffer, batch_size)
-        state, action, reward, next_state, done = map(np.stack, zip(*batch))
-        return state, action, reward, next_state, done
-    
-    def __len__(self):
-        return len(self.buffer)
-
-class DDPGAgent:
-    def __init__(self, state_dim, action_dim, actor_lr=1e-4, critic_lr=1e-3,
-                 gamma=0.99, tau=0.005, batch_size=32):
-        self.state_dim = state_dim
-        self.action_dim = action_dim
-        self.gamma = gamma
-        self.tau = tau
-        self.batch_size = batch_size
-
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        self.actor = Actor(state_dim, action_dim).to(self.device)
-        self.actor_target = Actor(state_dim, action_dim).to(self.device)
-        self.actor_target.load_state_dict(self.actor.state_dict())
-
-        self.critic = Critic(state_dim, action_dim).to(self.device)
-        self.critic_target = Critic(state_dim, action_dim).to(self.device)
-        self.critic_target.load_state_dict(self.critic.state_dict())
-
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
-
-        self.memory = ReplayBuffer()
-
-        # Paramètre pour l'exploration (bruit gaussien)
-        self.noise_std = 0.2
-
-    def select_action(self, state, add_noise=True):
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        self.actor.eval()
-        with torch.no_grad():
-            action = self.actor(state_tensor).cpu().data.numpy().flatten()
-        self.actor.train()
-        if add_noise:
-            noise = np.random.normal(0, self.noise_std, size=self.action_dim)
-            action = action + noise
-        # Pour la vitesse forward, on peut la forcer dans [0,1] en transformant la sortie
-        action[0] = np.clip((action[0] + 1) / 2, 0, 1)  # transformation de [-1,1] vers [0,1]
-        action[1] = np.clip(action[1], -1, 1)
-        return action
-
-    def push(self, state, action, reward, next_state, done):
-        self.memory.push(state, action, reward, next_state, done)
-
-    def update(self):
-        if len(self.memory) < self.batch_size:
-            return
-        
-        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.FloatTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).reshape(-1,1).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).reshape(-1,1).to(self.device)
-        
-        # Critic update
-        with torch.no_grad():
-            next_actions = self.actor_target(next_states)
-            next_actions[:,0] = (next_actions[:,0] + 1) / 2  # transformation pour la vitesse
-            target_q = self.critic_target(next_states, next_actions)
-            target_q = rewards + (1 - dones) * self.gamma * target_q
-        
-        current_q = self.critic(states, actions)
-        critic_loss = nn.MSELoss()(current_q, target_q)
-        
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
-        
-        # Actor update
-        actor_actions = self.actor(states)
-        # On transforme la première composante en [0,1]
-        actor_actions_transformed = actor_actions.clone()
-        actor_actions_transformed[:,0] = (actor_actions_transformed[:,0] + 1) / 2
-        actor_loss = -self.critic(states, actor_actions_transformed).mean()
-        
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
-        
-        # Soft update des réseaux cibles
-        for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
-            target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
-        
-        for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
-            target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
-
-###########################################
-# FIN PARTIE DDPG
-###########################################
-
 # =======================
 # CLASSE : OccupancyGrid
 # =======================
 class OccupancyGrid(Grid):
     """Grille d'occupation simplifiée"""
+
     def __init__(self, world_size, resolution: float, lidar_sensor):
         super().__init__(size_area_world=world_size, resolution=resolution)
         self.world_size = world_size
@@ -237,6 +93,7 @@ class OccupancyGrid(Grid):
                     rescue_y = pose.position[1] + detection.distance * math.sin(detection.angle + pose.orientation)
                     self.add_points(rescue_x, rescue_y, VAL_ZONE_LIBRE)
 
+        # Mise à jour de la rescue zone via les détections sémantiques (si fournies)
         if semantic_detections is not None:
             for detection in semantic_detections:
                 if detection.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
@@ -342,20 +199,11 @@ class MyDroneEval(DroneAbstract):
         self.forward_speed = 1.0
 
         self.explored_reward = 0
-        self._old_explored_reward = 0
 
         resolution = 8
         self.grid = OccupancyGrid(world_size=self.size_area, resolution=resolution, lidar_sensor=self.lidar())
         self.path_done = Path()
         self.last_known_inside_area = None
-
-        # Initialisation de l'agent DDPG pour le mode exploration.
-        grid_shape = self.grid.grid.shape  # (largeur, hauteur)
-        state_dim = 2 + 1 + grid_shape[0] * grid_shape[1]  # position (2), angle (1) et grille aplatie
-        action_dim = 2  # forward et rotation
-        self.ddpg_agent = DDPGAgent(state_dim, action_dim)
-        self.last_explore_state = None
-        self.last_explore_action = None
 
     def define_message_for_all(self):
         msg_data = (self.identifier,
@@ -366,23 +214,41 @@ class MyDroneEval(DroneAbstract):
 
     def process_communication_sensor(self):
         grid_values = [self.grid.grid]
+
         if self.communicator:
             received_messages = self.communicator.received_messages
             for msg in received_messages:
                 grid_values.append(msg[2])
+
+        # Empiler toutes les matrices dans un tableau 3D de forme (n, rows, cols)
         stacked = np.stack(grid_values, axis=0)
-        positive_mask = stacked > 0
-        has_positive = np.any(positive_mask, axis=0)
+        
+        # Pour chaque élément, on détermine s'il existe une valeur > 0 parmi les matrices
+        positive_mask = stacked > 0  # masque booléen de même forme que stacked
+        has_positive = np.any(positive_mask, axis=0)  # booléen pour chaque (i, j)
+
+        # Pour les positions avec au moins une valeur positive, on prend le maximum positif.
+        # On remplace les valeurs non-positives par -inf pour ne pas fausser le max.
         pos_max = np.max(np.where(positive_mask, stacked, -np.inf), axis=0)
+        
+        # Pour les positions sans valeur positive, on prend la valeur minimale parmi toutes les matrices.
         overall_min = np.min(stacked, axis=0)
+        
+        # Combiner les deux résultats en fonction de la présence de valeurs positives
         self.grid.grid = np.where(has_positive, pos_max, overall_min)
 
+            
+                
+
     def control(self):
-        print("reward exploration:", self.explored_reward, "last :", self._old_explored_reward, "diff:", self.explored_reward -self._old_explored_reward)
+        # Initialisation de la commande par défaut
+        print("reward exploration:", self.explored_reward)
         command = {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
+        # Traitement du capteur sémantique
         found_wounded, found_rescue, semantic_command = self.process_semantic_sensor()
 
+        # Mise à jour de l'état en fonction des détections et de l'état du grappin
         if self.state == MyDroneEval.Activity.SEARCHING_WOUNDED and found_wounded:
             self.state = MyDroneEval.Activity.GRASPING_WOUNDED
         elif self.state == MyDroneEval.Activity.GRASPING_WOUNDED and self.base.grasper.grasped_entities:
@@ -426,8 +292,6 @@ class MyDroneEval(DroneAbstract):
             self.grid.display(self.grid.grid, self.estimated_pose, title="Grille d'occupation")
             self.grid.display(self.grid.zoomed_grid, self.estimated_pose, title="Grille zoomée")
 
-        self._old_explored_reward = self.explored_reward
-
         return command
 
     def draw_bottom_layer(self):
@@ -443,8 +307,10 @@ class MyDroneEval(DroneAbstract):
                                  float(current_point[0]), float(current_point[1]), color)
             previous_point = current_point
 
+    # Méthode commune pour calculer une commande PD vers une cible donnée (en coordonnées de grille)
     def compute_pd_command(self, target_grid: Tuple[int, int]) -> dict:
         target_world = np.asarray(self.grid._conv_grid_to_world(target_grid[0], target_grid[1]))
+        # On enregistre la position cible dans le chemin parcouru
         self.path_done.append(Pose(target_world, self.measured_compass_angle()))
         current_pos = np.array(self.estimated_pose.position)
         direction = target_world - current_pos
@@ -457,31 +323,23 @@ class MyDroneEval(DroneAbstract):
         return {"forward": forward, "rotation": rotation}
 
     def control_explore(self):
-        # Construction de l'état : position (2), angle (1) et grille aplatie
+        self.command_counter += 1
         grid_matrix = self.grid.grid
-        state = np.concatenate([
-            np.array(self.estimated_pose.position).flatten(),
-            np.array([self.measured_compass_angle()]),
-            grid_matrix.flatten()
-        ])
-        # Si un état précédent existe, mettre à jour l'agent avec la transition
-        diff = self.explored_reward - self._old_explored_reward
-        if self.last_explore_state is not None:
-            self.ddpg_agent.push(self.last_explore_state, self.last_explore_action, 
-                                   diff, state, False)
-            self.ddpg_agent.update()
-        # Si la différence est nulle, on force une action d'exploration aléatoire
-        if diff == 0:
-            # On peut définir une action aléatoire dans l'intervalle désiré :
-            action = np.array([random.uniform(0, 1), random.uniform(-1, 1)])
-        else:
-            # Sinon, on utilise l'agent DDPG pour sélectionner une action
-            action = self.ddpg_agent.select_action(state)
-        self.last_explore_state = state
-        self.last_explore_action = action
-        # L'action est un vecteur [forward, rotation]
-        cmd = {"forward": float(action[0]), "rotation": float(action[1])}
-        return cmd
+        free_indices = np.argwhere(grid_matrix == VAL_INITIALE)
+        if free_indices.size == 0:
+            print("Aucune zone libre trouvée pour l'exploration.")
+            return {"forward": 0.0, "rotation": 0.0}
+
+        barycenter = tuple(map(int, free_indices.mean(axis=0)))
+        current_grid = self.grid._conv_world_to_grid(int(self.estimated_pose.position[0]),
+                                                     int(self.estimated_pose.position[1]))
+        path = a_star(grid_matrix, current_grid, barycenter, mode='search')
+        if not path or len(path) < 2:
+            print("Aucun chemin trouvé vers le barycentre.")
+            return self.control_random()
+
+        next_cell = path[min(2, len(path)-1)]
+        return self.compute_pd_command(next_cell)
 
     def process_lidar_sensor(self) -> bool:
         lidar_vals = self.lidar_values()
@@ -523,6 +381,7 @@ class MyDroneEval(DroneAbstract):
             print("Cible (rescue zone) en grille:", target_cell)
         current_grid = self.grid._conv_world_to_grid(int(self.estimated_pose.position[0]),
                                                      int(self.estimated_pose.position[1]))
+
         path = a_star(grid_matrix, current_grid, target_cell, mode='rescue_zone')
         if not path or len(path) < 2:
             print("Aucun chemin trouvé vers la rescue zone.")
@@ -554,6 +413,7 @@ class MyDroneEval(DroneAbstract):
         best_angle = 0
         found_wounded = False
 
+        # Traitement des personnes blessées
         if self.state in [MyDroneEval.Activity.SEARCHING_WOUNDED, MyDroneEval.Activity.GRASPING_WOUNDED] and detections:
             wounded_scores = []
             for det in detections:
@@ -565,6 +425,7 @@ class MyDroneEval(DroneAbstract):
                 best_score = min(wounded_scores, key=lambda x: x[0])
                 best_angle = best_score[1]
 
+        # Traitement des rescue centers
         found_rescue = False
         near_rescue = False
         rescue_angles = []
