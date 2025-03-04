@@ -67,7 +67,7 @@ class Launcher:
         self.team_info = TeamInfo()
         self.eval_plan = EvalPlan()
 
-        eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=5)
+        eval_config = EvalConfig(map_type=MyMapIntermediate01, nb_rounds=3)
         self.eval_plan.add(eval_config=eval_config)
         self.number_drones = None
         self.max_timestep_limit = None

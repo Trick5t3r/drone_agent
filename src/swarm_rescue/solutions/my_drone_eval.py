@@ -177,6 +177,42 @@ class DDPGAgent:
         
         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
             target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
+    
+    def save(self, path):
+        checkpoint = {
+            'actor_state_dict': self.actor.state_dict(),
+            'actor_target_state_dict': self.actor_target.state_dict(),
+            'critic_state_dict': self.critic.state_dict(),
+            'critic_target_state_dict': self.critic_target.state_dict(),
+            'actor_optimizer_state_dict': self.actor_optimizer.state_dict(),
+            'critic_optimizer_state_dict': self.critic_optimizer.state_dict(),
+            'memory': self.memory.buffer,  # Optionnel : sauvegarde du replay buffer
+            'noise_std': self.noise_std,
+            'gamma': self.gamma,
+            'tau': self.tau,
+            'batch_size': self.batch_size
+        }
+        torch.save(checkpoint, path)
+
+    def load(self, path):
+        """
+        agent = DDPGAgent(state_dim, action_dim)
+        agent.load("chemin/vers/le_fichier_checkpoint.pth")
+        """
+        checkpoint = torch.load(path, map_location=self.device)
+        self.actor.load_state_dict(checkpoint['actor_state_dict'])
+        self.actor_target.load_state_dict(checkpoint['actor_target_state_dict'])
+        self.critic.load_state_dict(checkpoint['critic_state_dict'])
+        self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
+        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
+        self.memory.buffer = checkpoint['memory']  # Recharge du replay buffer
+        self.noise_std = checkpoint.get('noise_std', self.noise_std)
+        self.gamma = checkpoint.get('gamma', self.gamma)
+        self.tau = checkpoint.get('tau', self.tau)
+        self.batch_size = checkpoint.get('batch_size', self.batch_size)
+
+
 
 ###########################################
 # FIN PARTIE DDPG
