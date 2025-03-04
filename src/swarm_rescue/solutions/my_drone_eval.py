@@ -203,18 +203,47 @@ class DDPGAgent:
         agent.load("chemin/vers/le_fichier_checkpoint.pth")
         """
         try:
-            checkpoint = torch.load(path, map_location=self.device)
+            # Ajouter _reconstruct aux globals sûrs pour autoriser son utilisation
+            torch.serialization.add_safe_globals([np._core.multiarray._reconstruct])
+            checkpoint = torch.load(path, map_location=self.device, weights_only=False)
             
-            # Charger la configuration (dimensions de l'état et de l'action)
-            self.state_dim = checkpoint.get('state_dim', self.state_dim)
-            self.action_dim = checkpoint.get('action_dim', self.action_dim)
+            # Charger les dimensions sauvegardées dans le checkpoint
+            ckpt_state_dim = checkpoint.get('state_dim', self.state_dim)
+            ckpt_action_dim = checkpoint.get('action_dim', self.action_dim)
             
+            # Si les dimensions ont changé, réinitialiser les réseaux et les optimizers
+            if ckpt_state_dim != self.state_dim or ckpt_action_dim != self.action_dim:
+                print("Les dimensions ont changé, réinitialisation des réseaux et des optimizers.")
+                self.state_dim = ckpt_state_dim
+                self.action_dim = ckpt_action_dim
+                
+                # Recréer les réseaux avec les nouvelles dimensions
+                self.actor = Actor(self.state_dim, self.action_dim).to(self.device)
+                self.actor_target = Actor(self.state_dim, self.action_dim).to(self.device)
+                self.critic = Critic(self.state_dim, self.action_dim).to(self.device)
+                self.critic_target = Critic(self.state_dim, self.action_dim).to(self.device)
+                
+                # Synchroniser les poids des réseaux cibles
+                self.actor_target.load_state_dict(self.actor.state_dict())
+                self.critic_target.load_state_dict(self.critic.state_dict())
+                
+                # Réinitialiser les optimizers avec les nouveaux paramètres (conserver le lr)
+                actor_lr = self.actor_optimizer.param_groups[0]['lr']
+                critic_lr = self.critic_optimizer.param_groups[0]['lr']
+                self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
+                self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
+            
+            # Charger les state_dict pour les réseaux
             self.actor.load_state_dict(checkpoint['actor_state_dict'])
             self.actor_target.load_state_dict(checkpoint['actor_target_state_dict'])
             self.critic.load_state_dict(checkpoint['critic_state_dict'])
             self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
+            
+            # Charger les state_dict pour les optimizers
             self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
             self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
+            
+            # Charger le replay buffer et les hyperparamètres
             self.memory.buffer = checkpoint['memory']  # Recharge du replay buffer
             self.noise_std = checkpoint.get('noise_std', self.noise_std)
             self.gamma = checkpoint.get('gamma', self.gamma)
@@ -224,6 +253,7 @@ class DDPGAgent:
         except FileNotFoundError:
             print("file not found")
             return False
+
 
 
 

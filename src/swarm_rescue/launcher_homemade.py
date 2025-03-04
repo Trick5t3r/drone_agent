@@ -26,7 +26,9 @@ from solutions.my_drone_eval import MyDroneEval, DDPGAgent
 class MyDrone(MyDroneEval):
     pass
 
-PATH_CONF_AGENT = "./conf_agent/agent_1_checkpoint.pt"
+PATH_CONF_AGENT_LOAD = "./conf_agent/agent_1_checkpoint.pt"
+PATH_CONF_AGENT_SAVE = PATH_CONF_AGENT_LOAD
+
 
 class Launcher:
     """
@@ -193,7 +195,7 @@ class Launcher:
                 has_crashed,
                 conf_agent)
 
-    def go(self, stop_at_first_crash: bool = False, hide_solution_output: bool = False, path_load_previous_agent = PATH_CONF_AGENT):
+    def go(self, stop_at_first_crash: bool = False, hide_solution_output: bool = False, path_load_previous_agent = PATH_CONF_AGENT_LOAD):
         """
         The go method in the Launcher class is responsible for running the simulation for different eval_config,
          and calculating the score for each one.
@@ -285,7 +287,7 @@ class Launcher:
 
         print(f"--------------------------------------------------------------------------------------------")
         self.data_saver.generate_pdf_report()
-        conf_agent.save(PATH_CONF_AGENT)
+        conf_agent.save(PATH_CONF_AGENT_SAVE)
         print("Agent saved")
 
         return ok
