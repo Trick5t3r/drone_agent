@@ -20,12 +20,13 @@ from maps.map_final_2022_23 import MyMapFinal2022_23
 from maps.map_medium_01 import MyMapMedium01
 from maps.map_medium_02 import MyMapMedium02
 
-from solutions.my_drone_eval import MyDroneEval
+from solutions.my_drone_eval import MyDroneEval, DDPGAgent
 
 
 class MyDrone(MyDroneEval):
     pass
 
+PATH_CONF_AGENT = "./conf_agent/agent_1_checkpoint.pt"
 
 class Launcher:
     """
@@ -192,13 +193,30 @@ class Launcher:
                 has_crashed,
                 conf_agent)
 
-    def go(self, stop_at_first_crash: bool = False, hide_solution_output: bool = False):
+    def go(self, stop_at_first_crash: bool = False, hide_solution_output: bool = False, path_load_previous_agent = PATH_CONF_AGENT):
         """
         The go method in the Launcher class is responsible for running the simulation for different eval_config,
          and calculating the score for each one.
         """
         ok = True
         conf_agent = None
+        if path_load_previous_agent:
+            eval_config = self.eval_plan.list_eval_config[0]
+
+            my_map = eval_config.map_type(eval_config.zones_config)
+            world_size = my_map.size_area 
+            resolution = 8
+
+            grid_width = int(world_size[0] / resolution + 0.5)
+            grid_height = int(world_size[1] / resolution + 0.5)
+
+            grid_shape = (grid_width, grid_height)
+
+            agent = DDPGAgent(state_dim=3, action_dim=2) #valeurs bidons
+            temoin = agent.load(path_load_previous_agent)
+            if temoin:
+                conf_agent = agent
+                print("Agent loaded")
 
         print(f"--------------------------------------------------------------------------------------------")
 
@@ -267,6 +285,8 @@ class Launcher:
 
         print(f"--------------------------------------------------------------------------------------------")
         self.data_saver.generate_pdf_report()
+        conf_agent.save(PATH_CONF_AGENT)
+        print("Agent saved")
 
         return ok
 

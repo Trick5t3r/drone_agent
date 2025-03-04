@@ -190,27 +190,42 @@ class DDPGAgent:
             'noise_std': self.noise_std,
             'gamma': self.gamma,
             'tau': self.tau,
-            'batch_size': self.batch_size
+            'batch_size': self.batch_size,
+            'state_dim': self.state_dim,  # Configuration : dimension de l'état
+            'action_dim': self.action_dim  # Configuration : dimension de l'action
         }
         torch.save(checkpoint, path)
+
 
     def load(self, path):
         """
         agent = DDPGAgent(state_dim, action_dim)
         agent.load("chemin/vers/le_fichier_checkpoint.pth")
         """
-        checkpoint = torch.load(path, map_location=self.device)
-        self.actor.load_state_dict(checkpoint['actor_state_dict'])
-        self.actor_target.load_state_dict(checkpoint['actor_target_state_dict'])
-        self.critic.load_state_dict(checkpoint['critic_state_dict'])
-        self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
-        self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
-        self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
-        self.memory.buffer = checkpoint['memory']  # Recharge du replay buffer
-        self.noise_std = checkpoint.get('noise_std', self.noise_std)
-        self.gamma = checkpoint.get('gamma', self.gamma)
-        self.tau = checkpoint.get('tau', self.tau)
-        self.batch_size = checkpoint.get('batch_size', self.batch_size)
+        try:
+            checkpoint = torch.load(path, map_location=self.device)
+            
+            # Charger la configuration (dimensions de l'état et de l'action)
+            self.state_dim = checkpoint.get('state_dim', self.state_dim)
+            self.action_dim = checkpoint.get('action_dim', self.action_dim)
+            
+            self.actor.load_state_dict(checkpoint['actor_state_dict'])
+            self.actor_target.load_state_dict(checkpoint['actor_target_state_dict'])
+            self.critic.load_state_dict(checkpoint['critic_state_dict'])
+            self.critic_target.load_state_dict(checkpoint['critic_target_state_dict'])
+            self.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+            self.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
+            self.memory.buffer = checkpoint['memory']  # Recharge du replay buffer
+            self.noise_std = checkpoint.get('noise_std', self.noise_std)
+            self.gamma = checkpoint.get('gamma', self.gamma)
+            self.tau = checkpoint.get('tau', self.tau)
+            self.batch_size = checkpoint.get('batch_size', self.batch_size)
+            return True
+        except FileNotFoundError:
+            print("file not found")
+            return False
+
+
 
 
 
