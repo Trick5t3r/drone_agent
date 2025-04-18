@@ -1,3 +1,114 @@
+
+
+
+
+
+
+
+
+
+# class DDPGAgent:
+#     def __init__(self, state_dim, action_dim, actor_lr=1e-4, critic_lr=1e-3,
+#                  gamma=0.99, tau=0.005, batch_size=32):
+#         self.state_dim = state_dim
+#         self.action_dim = action_dim
+#         self.gamma = gamma
+#         self.tau = tau
+#         self.batch_size = batch_size
+
+#         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+#         self.actor = Actor(state_dim, action_dim).to(self.device)
+#         self.actor_target = Actor(state_dim, action_dim).to(self.device)
+#         self.actor_target.load_state_dict(self.actor.state_dict())
+
+#         self.critic = Critic(state_dim, action_dim).to(self.device)
+#         self.critic_target = Critic(state_dim, action_dim).to(self.device)
+#         self.critic_target.load_state_dict(self.critic.state_dict())
+
+#         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
+#         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
+
+#         self.memory = ReplayBuffer()
+
+#         # Paramètre pour l'exploration (bruit gaussien)
+#         self.noise_std = 0.2
+
+#     def select_action(self, state, add_noise=True):
+#         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+#         self.actor.eval()
+#         with torch.no_grad():
+#             action = self.actor(state_tensor).cpu().data.numpy().flatten()
+#         self.actor.train()
+#         if add_noise:
+#             noise = np.random.normal(0, self.noise_std, size=self.action_dim)
+#             action = action + noise
+#         # Pour la vitesse forward, on peut la forcer dans [0,1] en transformant la sortie
+#         action[0] = np.clip((action[0] + 1) / 2, 0, 1)  # transformation de [-1,1] vers [0,1]
+#         action[1] = np.clip(action[1], -1, 1)
+#         print(action)
+#         return action
+
+#     def push(self, state, action, reward, next_state, done):
+#         self.memory.push(state, action, reward, next_state, done)
+
+#     def update(self):
+#         if len(self.memory) < self.batch_size:
+#             return
+        
+#         states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
+#         states = torch.FloatTensor(states).to(self.device)
+#         actions = torch.FloatTensor(actions).to(self.device)
+#         rewards = torch.FloatTensor(rewards).reshape(-1,1).to(self.device)
+#         next_states = torch.FloatTensor(next_states).to(self.device)
+#         dones = torch.FloatTensor(dones).reshape(-1,1).to(self.device)
+        
+#         # Critic update
+#         with torch.no_grad():
+#             next_actions = self.actor_target(next_states)
+#             next_actions[:,0] = (next_actions[:,0] + 1) / 2  # transformation pour la vitesse
+#             target_q = self.critic_target(next_states, next_actions)
+#             target_q = rewards + (1 - dones) * self.gamma * target_q
+        
+#         current_q = self.critic(states, actions)
+#         critic_loss = nn.MSELoss()(current_q, target_q)
+        
+#         self.critic_optimizer.zero_grad()
+#         critic_loss.backward()
+#         self.critic_optimizer.step()
+        
+#         # Actor update
+#         actor_actions = self.actor(states)
+#         # On transforme la première composante en [0,1]
+#         actor_actions_transformed = actor_actions.clone()
+#         actor_actions_transformed[:,0] = (actor_actions_transformed[:,0] + 1) / 2
+#         actor_loss = -self.critic(states, actor_actions_transformed).mean()
+        
+#         self.actor_optimizer.zero_grad()
+#         actor_loss.backward()
+#         self.actor_optimizer.step()
+        
+#         # Soft update des réseaux cibles
+#         for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
+#             target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
+        
+#         for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
+#             target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
+
+###########################################
+# FIN PARTIE DDPG
+###########################################
+
+
+
+
+
+
+
+
+
+
+
 import sys
 import random
 import math
@@ -42,36 +153,6 @@ CLIP_MIN = -40
 CLIP_MAX = 40
 VAL_RESCUE_ZONE = 100.0
 
-###########################################
-# PARTIE DDPG : Définition des réseaux et agent
-###########################################
-
-class Actor(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Actor, self).__init__()
-        self.fc1 = nn.Linear(state_dim, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, action_dim)
-    
-    def forward(self, state):
-        x = torch.relu(self.fc1(state))
-        x = torch.relu(self.fc2(x))
-        # Utilisation de tanh pour obtenir des sorties dans [-1,1]
-        x = torch.tanh(self.fc3(x))
-        return x
-
-class Critic(nn.Module):
-    def __init__(self, state_dim, action_dim):
-        super(Critic, self).__init__()
-        self.fc1 = nn.Linear(state_dim + action_dim, 128)
-        self.fc2 = nn.Linear(128, 64)
-        self.fc3 = nn.Linear(64, 1)
-    
-    def forward(self, state, action):
-        x = torch.cat([state, action], dim=1)
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        return self.fc3(x)
 
 class ReplayBuffer:
     def __init__(self, capacity=10000):
@@ -91,96 +172,108 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-class DDPGAgent:
-    def __init__(self, state_dim, action_dim, actor_lr=1e-4, critic_lr=1e-3,
-                 gamma=0.99, tau=0.005, batch_size=32):
+class DQN(nn.Module):
+    def __init__(self, input_dim, output_dim):
+        super(DQN, self).__init__()
+        self.fc1 = nn.Linear(input_dim, 128)
+        self.fc2 = nn.Linear(128, 128)
+        self.fc3 = nn.Linear(128, output_dim)
+    
+    def forward(self, x):
+        x = torch.relu(self.fc1(x))
+        x = torch.relu(self.fc2(x))
+        return self.fc3(x)
+    
+class DDPG:
+    def __init__(self, state_dim, action_dim, policy_lr=1e-2, target_lr=1e-2,
+                gamma=0.99, tau=0.005, batch_size=256, epsilon = 1e-1, nb_action_poss = 5):
+        # mettre nb_action_poss en impaire pour avoir 0
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.gamma = gamma
         self.tau = tau
         self.batch_size = batch_size
+        self.nb_action_poss = nb_action_poss
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-        self.actor = Actor(state_dim, action_dim).to(self.device)
-        self.actor_target = Actor(state_dim, action_dim).to(self.device)
-        self.actor_target.load_state_dict(self.actor.state_dict())
-
-        self.critic = Critic(state_dim, action_dim).to(self.device)
-        self.critic_target = Critic(state_dim, action_dim).to(self.device)
-        self.critic_target.load_state_dict(self.critic.state_dict())
-
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
-        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
-
+        self.policy = DQN(state_dim, self.nb_action_poss**2).to(self.device)
+        self.target = DQN(state_dim, self.nb_action_poss**2).to(self.device)
+        self.target.load_state_dict(self.policy.state_dict())
+        
+        self.optim_policy = optim.Adam(self.policy.parameters(), lr=policy_lr)
         self.memory = ReplayBuffer()
-
-        # Paramètre pour l'exploration (bruit gaussien)
-        self.noise_std = 0.2
-
-    def select_action(self, state, add_noise=True):
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-        self.actor.eval()
-        with torch.no_grad():
-            action = self.actor(state_tensor).cpu().data.numpy().flatten()
-        self.actor.train()
-        if add_noise:
-            noise = np.random.normal(0, self.noise_std, size=self.action_dim)
-            action = action + noise
-        # Pour la vitesse forward, on peut la forcer dans [0,1] en transformant la sortie
-        action[0] = np.clip((action[0] + 1) / 2, 0, 1)  # transformation de [-1,1] vers [0,1]
-        action[1] = np.clip(action[1], -1, 1)
-        return action
+        
+        self.epsilon = epsilon
+        
+        # on dicretise les actions possibles pour ne pas utilise de critic network
+        self.possible_action = self.action_possibles()
+    
+    def action_possibles(self):
+        a = np.linspace(-1,1,self.nb_action_poss)
+        b = np.linspace(-1,1,self.nb_action_poss)
+        A, B = np.meshgrid(a, b)
+        cartesian_product = np.column_stack([A.ravel(), B.ravel()])
+        return cartesian_product
 
     def push(self, state, action, reward, next_state, done):
         self.memory.push(state, action, reward, next_state, done)
-
-    def update(self):
-        if len(self.memory) < self.batch_size:
+        
+    def select_action(self, state):
+        # Eps- Greedy algo with a finit number of actions
+        if random.random()< self.epsilon:
+            return  random.randint(0, len(self.possible_action) - 1)
+        else:
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+            q_values = self.policy(state_tensor)
+            return torch.argmax(q_values).item()
+    
+    def optimize_model(self):
+        if len(self.memory.buffer) < self.batch_size:
             return
         
-        states, actions, rewards, next_states, dones = self.memory.sample(self.batch_size)
-        states = torch.FloatTensor(states).to(self.device)
-        actions = torch.FloatTensor(actions).to(self.device)
-        rewards = torch.FloatTensor(rewards).reshape(-1,1).to(self.device)
-        next_states = torch.FloatTensor(next_states).to(self.device)
-        dones = torch.FloatTensor(dones).reshape(-1,1).to(self.device)
-        
-        # Critic update
-        with torch.no_grad():
-            next_actions = self.actor_target(next_states)
-            next_actions[:,0] = (next_actions[:,0] + 1) / 2  # transformation pour la vitesse
-            target_q = self.critic_target(next_states, next_actions)
-            target_q = rewards + (1 - dones) * self.gamma * target_q
-        
-        current_q = self.critic(states, actions)
-        critic_loss = nn.MSELoss()(current_q, target_q)
-        
-        self.critic_optimizer.zero_grad()
-        critic_loss.backward()
-        self.critic_optimizer.step()
-        
-        # Actor update
-        actor_actions = self.actor(states)
-        # On transforme la première composante en [0,1]
-        actor_actions_transformed = actor_actions.clone()
-        actor_actions_transformed[:,0] = (actor_actions_transformed[:,0] + 1) / 2
-        actor_loss = -self.critic(states, actor_actions_transformed).mean()
-        
-        self.actor_optimizer.zero_grad()
-        actor_loss.backward()
-        self.actor_optimizer.step()
-        
-        # Soft update des réseaux cibles
-        for target_param, param in zip(self.actor_target.parameters(), self.actor.parameters()):
-            target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
-        
-        for target_param, param in zip(self.critic_target.parameters(), self.critic.parameters()):
-            target_param.data.copy_(target_param.data * (1 - self.tau) + param.data * self.tau)
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.memory.sample(self.batch_size)
+        state_batch = torch.FloatTensor(state_batch)
+        action_batch = torch.LongTensor(action_batch).unsqueeze(1)
+        reward_batch = torch.FloatTensor(reward_batch)
+        next_state_batch = torch.FloatTensor(next_state_batch)
+        done_batch = torch.FloatTensor(done_batch)
 
-###########################################
-# FIN PARTIE DDPG
-###########################################
+        q_values = self.policy(state_batch).gather(1, action_batch).squeeze()
+
+        with torch.no_grad():
+            max_next_q_values = self.target(next_state_batch).max(1)[0]
+            target_q_values = reward_batch + self.gamma * max_next_q_values * (1 - done_batch)
+
+        loss = nn.MSELoss()(q_values, target_q_values)
+
+        self.optim_policy.zero_grad()
+        loss.backward()
+        self.optim_policy.step()
+        
+        for target_param, policy_param in zip(self.target.parameters(), self.policy.parameters()):
+            target_param.data.copy_(self.tau * policy_param.data + (1 - self.tau) * target_param.data)
+    
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 # =======================
 # CLASSE : OccupancyGrid
@@ -353,7 +446,8 @@ class MyDroneEval(DroneAbstract):
         grid_shape = self.grid.grid.shape  # (largeur, hauteur)
         state_dim = 2 + 1 + grid_shape[0] * grid_shape[1]  # position (2), angle (1) et grille aplatie
         action_dim = 2  # forward et rotation
-        self.ddpg_agent = DDPGAgent(state_dim, action_dim)
+        self.nb_action_poss = 5
+        self.ddpg_agent = DDPG(state_dim, action_dim, nb_action_poss=self.nb_action_poss)
         self.last_explore_state = None
         self.last_explore_action = None
 
@@ -378,7 +472,7 @@ class MyDroneEval(DroneAbstract):
         self.grid.grid = np.where(has_positive, pos_max, overall_min)
 
     def control(self):
-        print("reward exploration:", self.explored_reward, "last :", self._old_explored_reward, "diff:", self.explored_reward -self._old_explored_reward)
+        print("reward exploration:", self.explored_reward, "last :", self._old_explored_reward, "diff:", self.explored_reward -self._old_explored_reward,"min de la grid?", np.min(self.grid.grid))
         command = {"forward": 0.0, "lateral": 0.0, "rotation": 0.0, "grasper": 0}
 
         found_wounded, found_rescue, semantic_command = self.process_semantic_sensor()
@@ -443,6 +537,7 @@ class MyDroneEval(DroneAbstract):
                                  float(current_point[0]), float(current_point[1]), color)
             previous_point = current_point
 
+
     def compute_pd_command(self, target_grid: Tuple[int, int]) -> dict:
         target_world = np.asarray(self.grid._conv_grid_to_world(target_grid[0], target_grid[1]))
         self.path_done.append(Pose(target_world, self.measured_compass_angle()))
@@ -464,25 +559,50 @@ class MyDroneEval(DroneAbstract):
             np.array([self.measured_compass_angle()]),
             grid_matrix.flatten()
         ])
-        # Si un état précédent existe, mettre à jour l'agent avec la transition
-        diff = self.explored_reward - self._old_explored_reward
-        if self.last_explore_state is not None:
-            self.ddpg_agent.push(self.last_explore_state, self.last_explore_action, 
-                                   diff*10000, state, False)
-            self.ddpg_agent.update()
-        
-        action = self.ddpg_agent.select_action(state)
-        # Si la différence est nulle, on force une action d'exploration aléatoire
-        if diff == 0:
-            # On peut définir une action aléatoire dans l'intervalle désiré :
-            action += np.array([random.uniform(0, 1), random.uniform(-1, 1)])
-            action /= 2
 
+        # Position actuelle en grille
+        current_pos = self.grid._conv_world_to_grid(int(self.estimated_pose.position[0]),
+                                                    int(self.estimated_pose.position[1]))
+        cell_value = grid_matrix[current_pos[0], current_pos[1]]
+
+        # Récupérer les valeurs LIDAR et les angles
+        lidar_values = self.lidar().get_sensor_values()
+        lidar_angles = self.lidar().ray_angles
+
+        # Trouver le rayon le plus long (zone ouverte)
+        max_index = np.argmax(lidar_values)
+        max_distance = lidar_values[max_index]
+        best_ray_angle = lidar_angles[max_index] + self.measured_compass_angle()
+
+        # Calcul de la récompense
+        reward = 0.0
+
+        if cell_value < 0:
+            # Zone proche d'un mur : forte pénalité
+            reward -= 20.0
+        else:
+            # Zone sans murs : récompense proportionnelle à la distance libre
+            reward += max_distance  # plus la distance est grande, meilleure est la zone
+
+        # Bonus pour s'aligner avec la direction du meilleur rayon
+        current_angle = self.measured_compass_angle()
+        angle_diff = abs(normalize_angle(best_ray_angle - current_angle))
+        reward += (1 - angle_diff / np.pi) * 10  # bonus si l'agent s'oriente dans la bonne direction
+
+        # Bonus additionnel d'exploration globale (optionnel)
+        reward += (self.explored_reward - self._old_explored_reward) * 10
+
+        if self.last_explore_state is not None:
+            self.ddpg_agent.push(self.last_explore_state, self.last_explore_action, reward, state, False)
+            self.ddpg_agent.optimize_model()
+
+        # Sélection de l'action via le DQN (en mode discret)
+        action_index = self.ddpg_agent.select_action(state)
+        action = self.ddpg_agent.possible_action[action_index]
         self.last_explore_state = state
-        self.last_explore_action = action
-        # L'action est un vecteur [forward, rotation]
-        cmd = {"forward": float(action[0]), "rotation": float(action[1])}
-        return cmd
+        self.last_explore_action = action_index
+
+        return {"forward": float(action[0]), "rotation": float(action[1])}
 
     def process_lidar_sensor(self) -> bool:
         lidar_vals = self.lidar_values()
